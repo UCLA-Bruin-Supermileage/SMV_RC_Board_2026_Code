@@ -7,8 +7,8 @@ Currently in development. There are pin mapping conflicts for the tail lights, b
 | -------- | -------- |
 | CS_ADC | PB4 |
 | Turn_Signal_2 | PB7 |
-| CAN_TX | PB8 |
-| CAN_RX | PB9 |
+| CAN_RX | PB8 |
+| CAN_TX | PB9 |
 | CS_Accelerometer | PB12 |
 | SCL | PB13 |
 | MISO | PB14 |
