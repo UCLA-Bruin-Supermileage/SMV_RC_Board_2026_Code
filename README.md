@@ -13,6 +13,6 @@ Currently in development. There are pin mapping conflicts for the tail lights, b
 | SPI2_SCK | PB13 |
 | SPI2_MISO | PB14 |
 | SPI2_MOSI | PB15 |
-| Tail_Light | PA13 (conflict) |
-| Turn_Signal_1 | PA14 (conflict) |
-| Brake_Light | PH1 (conflict) |
+| Tail_Light | PA13 (conflict), provisionally PA0 |
+| Turn_Signal_1 | PA14 (conflict), provisionally PA1 |
+| Brake_Light | PH1 (conflict), provisionally PA4 |
