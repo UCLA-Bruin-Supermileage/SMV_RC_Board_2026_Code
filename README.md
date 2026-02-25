@@ -7,12 +7,12 @@ Currently in development. There are pin mapping conflicts for the tail lights, b
 | -------- | -------- |
 | CS_ADC | PB4 |
 | Turn_Signal_2 | PB7 |
-| CAN_RX | PB8 |
-| CAN_TX | PB9 |
+| CAN1_RX | PB8 |
+| CAN1_TX | PB9 |
 | CS_Accelerometer | PB12 |
-| SCL | PB13 |
-| MISO | PB14 |
-| MOSI | PB15 |
+| SPI2_SCK | PB13 |
+| SPI2_MISO | PB14 |
+| SPI2_MOSI | PB15 |
 | Tail_Light | PA13 (conflict) |
 | Turn_Signal_1 | PA14 (conflict) |
 | Brake_Light | PH1 (conflict) |
