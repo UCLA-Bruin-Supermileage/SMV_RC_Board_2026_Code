@@ -18,6 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "smv_canbus.h"
+#include "smv_ads1118.h"
+#include "stdbool.h"
+
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -31,6 +35,30 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define LEFT_SIGNAL_PORT GPIOB
+#define LEFT_SIGNAL_PIN 14
+#define RIGHT_SIGNAL_PORT GPIOB
+#define RIGHT_SIGNAL_PIN 7
+#define ADC_CS_PORT GPIOB
+#define ADC_CS_PIN 4
+#define SPI2_SCK_PORT GPIOB
+#define SPI2_SCK_PIN 13
+#define SPI2_MISO_PORT GPIOB
+#define SPI2_MISO_PIN 14
+#define SPI2_MOSI_PORT GPIOB
+#define SPI2_MOSI_PIN 15
+#define TAIL_LIGHT_PORT GPIOB
+#define TAIL_LIGHT_PIN 5
+#define BRAKE_LIGHT_PORT GPIOB
+#define BRAKE_LIGHT_PIN 6
+
+#define BLINK_INTERVAL 500
+#define PRESSURE_SEND_INTERVAL 100
+#define TORQUE_SEND_INTERVAL 100
+
+//TBD, DEFAULT FOR NOW
+#define PRESSURE_INDEX 0
+#define TORQUE_INDEX 1
 
 /* USER CODE END PD */
 
@@ -48,20 +76,80 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
+//STATUS FLAGS
+static volatile bool blink_left_active = false;
+static volatile bool blink_right_active = false;
+
+//CAN/ADC DATA
+static volatile double CAN_val = 0;
+static int CAN_sender = 0;
+static int CAN_type = 0;
+
+static double adc_read [4] = {0};
+
+//TIMERS
+static uint32_t blink_timer = 0;
+static uint32_t current_tick = 0;
+static uint32_t pressure_send_timer = 0;
+static uint32_t torque_send_timer = 0;
+
+//DEBUG
+static char type_string [20] = {0};
+
+CANBUS can1;
+SMV_ADS1118 adc1;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_CAN1_Init(void);
-static void MX_SPI2_Init(void);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
+
+{
+
+    /* Get RX message from FIFO0 and fill the data on the related FIFO0 user declared header
+       (RxHeaderFIFO0) and table (RxDataFIFO0) */
+    if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO0, &(can1.RxHeaderFIFO0), can1.RxDataFIFO0) != HAL_OK)
+    {
+        /* Reception Error */
+       Error_Handler();
+    }else{
+    	CAN_Interrupt_Helper(&can1);
+
+    	CAN_sender = can1.getHardwareRaw(&can1);
+    	CAN_type = can1.getDataTypeRaw(&can1);
+    	strcpy(type_string, can1.getDataType(&can1)); //DEBUG CODE
+    	CAN_val = can1.getData(&can1);
+
+    	if (CAN_sender == FC && CAN_type == Brake) {
+    		// Horn
+    		HAL_GPIO_WritePin(BRAKE_LIGHT_PORT, BRAKE_LIGHT_PIN, (CAN_val > 0.1) ? GPIO_PIN_SET: GPIO_PIN_RESET);
+		}
+    	if (CAN_sender == UI){
+    		// Turn Signals
+    		if (CAN_type == Blink_Left) {
+    			blink_left_active = (CAN_val > 0.5) ? true : false;
+    		}
+    		else if (CAN_type == Blink_Right) {
+    			blink_right_active = (CAN_val > 0.5) ? true : false;
+    		}else if (CAN_type == Hazard)	{
+    			blink_left_active = (CAN_val > 0.5) ? true : false;
+    			blink_right_active = (CAN_val > 0.5) ? true : false;
+    		}
+    	}
+
+	}
+}
 
 /* USER CODE END 0 */
 
@@ -95,9 +183,20 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
-  MX_CAN1_Init();
-  MX_SPI2_Init();
+
   /* USER CODE BEGIN 2 */
+
+  //CAN INIT
+  can1 = CAN_new();
+  can1.init(&can1, RC, &hcan1);
+  can1.addFilterDeviceData(&can1, UI, Blink_Left);
+  can1.addFilterDeviceData(&can1, UI, Blink_Right);
+  can1.addFilterDeviceData(&can1, UI, Hazard);
+  can1.addFilterDeviceData(&can1, FC, Brake);
+
+  //ADC INIT
+  adc1 = ADS_new();
+  adc1.init(&adc1, &hspi2, ADC_CS_PORT, ADC_CS_PIN, SPI2_MISO_PORT, SPI2_MISO_PIN);
 
   /* USER CODE END 2 */
 
@@ -105,6 +204,44 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	//READ SENSORS
+	adc1.sweep(&adc1, adc_read);
+
+	current_tick = HAL_GetTick();
+
+	//BLINKER LOGIC
+	if (blink_left_active) {
+	  if (current_tick - blink_timer >= BLINK_INTERVAL) {
+		  HAL_GPIO_TogglePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN);
+		  blink_timer = current_tick;
+	  }
+	}
+	else {
+	  HAL_GPIO_WritePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN, GPIO_PIN_RESET);
+	}
+
+	if (blink_right_active) {
+	  if (current_tick - blink_timer >= BLINK_INTERVAL) {
+		  HAL_GPIO_TogglePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN);
+		  blink_timer = current_tick;
+	  }
+	}
+	else {
+	  HAL_GPIO_WritePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN, GPIO_PIN_RESET);
+	}
+
+
+	//CAN SENDS
+	if (current_tick - pressure_send_timer >= PRESSURE_SEND_INTERVAL){
+	  can1.send(&can1, adc_read[PRESSURE_INDEX], RC_Pressure);
+	  HAL_Delay(1);
+	}
+
+	if (current_tick - torque_send_timer >= TORQUE_SEND_INTERVAL){
+	  can1.send(&can1, adc_read[TORQUE_INDEX], RC_Torque);
+	  HAL_Delay(1);
+	}
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -158,80 +295,6 @@ void SystemClock_Config(void)
   }
 }
 
-/**
-  * @brief CAN1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CAN1_Init(void)
-{
-
-  /* USER CODE BEGIN CAN1_Init 0 */
-
-  /* USER CODE END CAN1_Init 0 */
-
-  /* USER CODE BEGIN CAN1_Init 1 */
-
-  /* USER CODE END CAN1_Init 1 */
-  hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 16;
-  hcan1.Init.Mode = CAN_MODE_NORMAL;
-  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
-  hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = DISABLE;
-  hcan1.Init.AutoWakeUp = DISABLE;
-  hcan1.Init.AutoRetransmission = DISABLE;
-  hcan1.Init.ReceiveFifoLocked = DISABLE;
-  hcan1.Init.TransmitFifoPriority = DISABLE;
-  if (HAL_CAN_Init(&hcan1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN CAN1_Init 2 */
-
-  /* USER CODE END CAN1_Init 2 */
-
-}
-
-/**
-  * @brief SPI2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI2_Init(void)
-{
-
-  /* USER CODE BEGIN SPI2_Init 0 */
-
-  /* USER CODE END SPI2_Init 0 */
-
-  /* USER CODE BEGIN SPI2_Init 1 */
-
-  /* USER CODE END SPI2_Init 1 */
-  /* SPI2 parameter configuration*/
-  hspi2.Instance = SPI2;
-  hspi2.Init.Mode = SPI_MODE_MASTER;
-  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi2.Init.NSS = SPI_NSS_SOFT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi2.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI2_Init 2 */
-
-  /* USER CODE END SPI2_Init 2 */
-
-}
 
 /**
   * @brief USART2 Initialization Function
@@ -333,6 +396,7 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+
   }
   /* USER CODE END Error_Handler_Debug */
 }
