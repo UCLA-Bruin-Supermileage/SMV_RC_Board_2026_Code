@@ -36,23 +36,30 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LEFT_SIGNAL_PORT GPIOB
-#define LEFT_SIGNAL_PIN 0 // <- changed
-#define RIGHT_SIGNAL_PORT GPIOB
-#define RIGHT_SIGNAL_PIN 7
-#define ADC_CS_PORT GPIOB
-#define ADC_CS_PIN GPIO_PIN_4 // <- changed
-#define SPI2_SCK_PORT GPIOB
-#define SPI2_SCK_PIN 13
-#define SPI2_MISO_PORT GPIOB
-#define SPI2_MISO_PIN GPIO_PIN_14 // <- changed
-#define SPI2_MOSI_PORT GPIOB
-#define SPI2_MOSI_PIN 15
-#define TAIL_LIGHT_PORT GPIOB
-#define TAIL_LIGHT_PIN 5
-#define BRAKE_LIGHT_PORT GPIOB
-#define BRAKE_LIGHT_PIN 6
 
+// Pin definitions
+#define LEFT_SIGNAL_PORT Turn_Signal_2_GPIO_Port
+#define LEFT_SIGNAL_PIN Turn_Signal_2_Pin
+#define RIGHT_SIGNAL_PORT Turn_Signal_1_GPIO_Port
+#define RIGHT_SIGNAL_PIN Turn_Signal_1_Pin
+
+#define TAIL_LIGHT_PORT GPIOB
+#define TAIL_LIGHT_PIN GPIO_PIN_5
+
+#define BRAKE_LIGHT_PORT GPIOB
+#define BRAKE_LIGHT_PIN GPIO_PIN_6
+
+// SPI Pins
+#define SPI2_SCK_PORT GPIOB
+#define SPI2_SCK_PIN GPIO_PIN_13
+
+#define SPI2_MISO_PORT GPIOB
+#define SPI2_MISO_PIN GPIO_PIN_14
+
+#define SPI2_MOSI_PORT GPIOB
+#define SPI2_MOSI_PIN GPIO_PIN_15
+
+// Timing definitions (in ms)
 #define BLINK_INTERVAL 500
 #define PRESSURE_SEND_INTERVAL 100
 #define TORQUE_SEND_INTERVAL 100
@@ -80,6 +87,8 @@ UART_HandleTypeDef huart2;
 // STATUS FLAGS
 static volatile bool blink_left_active = false;
 static volatile bool blink_right_active = false;
+static volatile bool brake_light_active = false;
+static volatile bool hazards_active = false;
 
 // CAN/ADC DATA
 static volatile double CAN_val = 0;
@@ -95,7 +104,7 @@ static uint32_t pressure_send_timer = 0;
 static uint32_t torque_send_timer = 0;
 
 // DEBUG
-static char type_string[20] = {0};
+// static char type_string[20] = {0};
 
 CANBUS can1;
 SMV_ADS1118 adc1;
@@ -115,7 +124,6 @@ static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN 0 */
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle) {
-
   /* Get RX message from FIFO0 and fill the data on the related FIFO0 user
      declared header (RxHeaderFIFO0) and table (RxDataFIFO0) */
   if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO0, &(can1.RxHeaderFIFO0),
@@ -127,13 +135,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle) {
 
     CAN_sender = can1.getHardwareRaw(&can1);
     CAN_type = can1.getDataTypeRaw(&can1);
-    strcpy(type_string, can1.getDataType(&can1)); // DEBUG CODE
     CAN_val = can1.getData(&can1);
+    // strcpy(type_string, can1.getDataType(&can1)); // DEBUG CODE
 
     if (CAN_sender == FC && CAN_type == Brake) {
-      // Horn
-      HAL_GPIO_WritePin(BRAKE_LIGHT_PORT, BRAKE_LIGHT_PIN,
-                        (CAN_val > 0.1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+      brake_light_active =
+          (CAN_val > 1.5) ? true : false; // arbitrary threshold, TBD
     }
     if (CAN_sender == UI) {
       // Turn Signals
@@ -142,8 +149,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle) {
       } else if (CAN_type == Blink_Right) {
         blink_right_active = (CAN_val > 0.5) ? true : false;
       } else if (CAN_type == Hazard) {
-        blink_left_active = (CAN_val > 0.5) ? true : false;
-        blink_right_active = (CAN_val > 0.5) ? true : false;
+        hazards_active = (CAN_val > 0.5) ? true : false;
       }
     }
   }
@@ -192,11 +198,14 @@ int main(void) {
   can1.addFilterDeviceData(&can1, UI, Hazard);
   can1.addFilterDeviceData(&can1, FC, Brake);
 
+  can1.begin(&can1);
+
   // ADC INIT
   adc1 = ADS_new();
-  adc1.init(&adc1, &hspi2, SPI2, ADC_CS_PORT, ADC_CS_PIN, SPI2_MISO_PORT,
+  adc1.init(&adc1, &hspi2, SPI2, CS_ADC_GPIO_Port, CS_ADC_Pin, SPI2_MISO_PORT,
             SPI2_MISO_PIN);
 
+  HAL_GPIO_WritePin(TAIL_LIGHT_PORT, TAIL_LIGHT_PIN, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -209,24 +218,44 @@ int main(void) {
 
     // BLINKER LOGIC
     if (blink_left_active) {
-      if (current_tick - blink_timer >= BLINK_INTERVAL) {
-        HAL_GPIO_TogglePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN);
-        blink_timer = current_tick;
-      }
+      // if (current_tick - blink_timer >= BLINK_INTERVAL) {
+      HAL_GPIO_TogglePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN);
+      // blink_timer = current_tick;
+      // }
     } else {
       HAL_GPIO_WritePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN, GPIO_PIN_RESET);
     }
 
     if (blink_right_active) {
-      if (current_tick - blink_timer >= BLINK_INTERVAL) {
-        HAL_GPIO_TogglePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN);
-        blink_timer = current_tick;
-      }
+      // if (current_tick - blink_timer >= BLINK_INTERVAL) {
+      HAL_GPIO_TogglePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN);
+      // blink_timer = current_tick;
+      // }
     } else {
       HAL_GPIO_WritePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN, GPIO_PIN_RESET);
     }
 
+    // HAZARD LOGIC
+    if (hazards_active) {
+      // if (current_tick - blink_timer >= BLINK_INTERVAL) {
+      HAL_GPIO_TogglePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN);
+      HAL_GPIO_TogglePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN);
+      blink_timer = current_tick;
+      // }
+    } else {
+      HAL_GPIO_WritePin(LEFT_SIGNAL_PORT, LEFT_SIGNAL_PIN, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(RIGHT_SIGNAL_PORT, RIGHT_SIGNAL_PIN, GPIO_PIN_RESET);
+    }
+
+    // BRAKE LIGHT LOGIC
+    if (brake_light_active) {
+      HAL_GPIO_WritePin(BRAKE_LIGHT_PORT, BRAKE_LIGHT_PIN, GPIO_PIN_SET);
+    } else {
+      HAL_GPIO_WritePin(BRAKE_LIGHT_PORT, BRAKE_LIGHT_PIN, GPIO_PIN_RESET);
+    }
+
     // CAN SENDS
+
     if (current_tick - pressure_send_timer >= PRESSURE_SEND_INTERVAL) {
       can1.send(&can1, adc_read[PRESSURE_INDEX], RC_Pressure);
       HAL_Delay(1);
@@ -236,7 +265,6 @@ int main(void) {
       can1.send(&can1, adc_read[TORQUE_INDEX], RC_Torque);
       HAL_Delay(1);
     }
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
