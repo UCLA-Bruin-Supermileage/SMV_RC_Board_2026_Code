@@ -1,4 +1,32 @@
+# Build output
+Debug/
+Release/
 build/
-.vscode/
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+
+# STM32CubeIDE workspace metadata
+.metadata/
 .settings/
+*.launch
+
+# Eclipse/CubeIDE project files — keep .project and .cproject
+# but ignore user-specific settings
+*.prefs
+RemoteSystemsTempFiles/
+
+# macOS
 .DS_Store
+.osx.project
+
+# Compiler/linker intermediates
+*.o
+*.d
+*.su
+
+# VS Code
+.vscode/
+.cache/
